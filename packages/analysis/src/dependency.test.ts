@@ -5,6 +5,7 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 
 import { buildDependencyGraph } from "./dependency.js";
+import { write } from "node:fs";
 
 test("builds dependencies and reverse dependents", async() => {
     const repo = await mkdtemp(join(tmpdir(), "dependency-test-"));
@@ -41,6 +42,31 @@ test("builds dependencies and reverse dependents", async() => {
         ["tests/order.test.ts"]
     );
     } finally {
+        await rm(repo, {recursive: true, force: true});
+    }
+});
+
+test("igonre files inside node_modules", async () => {
+    const repo = await mkdtemp(join(tmpdir(), "dependency-ignore-test-"));
+
+    try{
+        await mkdir(join(repo, "src"), {recursive: true});
+        await mkdir(join(repo,"node_modules","fake-package"),{
+            recursive: true
+        });
+        await writeFile(
+            join(repo,"src","App.ts"),
+            "export const app = true;"
+        );
+
+        await writeFile(join(repo, "node_modules","fake-package","index.ts"),
+    "export const fake = true;");
+
+    const graph = await buildDependencyGraph(repo);
+
+    assert.ok(graph.dependencies["src/App.ts"]);
+    assert.ok(!Object.keys(graph.dependencies).some(path => path.startsWith("node_modules/")));
+    }finally{
         await rm(repo, {recursive: true, force: true});
     }
 });

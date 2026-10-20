@@ -14,7 +14,17 @@ async function collectSourceFiles(directory:string): Promise<string[]> {
     for(const entry of entries){
         const fullPath = join(directory, entry.name);
         if(entry.isDirectory()){
+
+            const ignoredDirectories = new Set([
+                "node_modules",
+                ".git",
+                "dist",
+                "coverage",
+                "build"
+            ]);
+            if(!ignoredDirectories.has(entry.name)){
             files.push(...await collectSourceFiles(fullPath));
+        }
         }else if(
             entry.isFile() && SOURCE_EXTENSIONS.has(extname(entry.name)) && !entry.name.endsWith(".d.ts")
         ){
