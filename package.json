@@ -1,0 +1,16 @@
+
+{
+  "name": "ai-release-risk-analyzer",
+  "version": "1.0.0",
+  "private": true,
+  "description": "Evidence-based software change impact and release risk analysis",
+  "workspaces": [
+    "apps/*",
+    "packages/*"
+  ],
+  "scripts": {
+    "build": "npm run build --workspaces --if-present",
+    "test": "npm test --workspaces --if-present"
+  },
+  "license": "MIT"
+}
