@@ -1,27 +1,75 @@
 import { analyzeGitDiff, type GitDiffResult } from "./index.js";
-import { buildDependencyGraph, findAffectedFiles } from "./dependency.js";
+import { buildDependencyGraph, findAffectedFiles, type DependencyGraph } from "./dependency.js";
+import { execFile } from "node:child_process";
+import { promisify } from "node:util";
+import { join } from "node:path";
+import { mkdtemp } from "node:fs/promises";
+import { tmpdir } from "node:os";
+import { rm } from "node:fs/promises";
 
+const execFileSync = promisify(execFile);
 export interface ImpactAnalysisResult{
     diff: GitDiffResult,
     affectedFiles: string[];
     affectedTests: string[];
 }
 
+function isTestPath(file: string): boolean {
+    return /(^|\/)(__tests__\/|tests?\/)|\.(test|spec)\.[jt]sx?$/.test(file);
+}
+
+async function buildGraphAtCommit(repositoryPath:string,
+    commit: string
+): Promise<DependencyGraph> {
+    const tempRoot = await mkdtemp(join(tmpdir(),"release-impact-"));
+    const workTreePath = join(tempRoot, "workTree");
+    let workTreeCreated = false;
+
+    try {
+        await execFileSync(
+        "git",
+        ["-C",repositoryPath,"worktree","add","--detach",workTreePath,commit],
+        {windowsHide: true});
+
+        workTreeCreated = true;
+        return await buildDependencyGraph(workTreePath);
+       } finally {
+        if(workTreeCreated){
+            try{
+                await execFileSync(
+                    "git",
+                    ["-C",repositoryPath,"worktree","remove","--force",workTreePath],
+                    {windowsHide:true}
+               );
+            }finally{
+                await rm(tempRoot, {recursive: true, force: true});
+            }
+        }else{
+            await rm(tempRoot, { recursive: true, force: true });
+        }
+    }
+}
+
 export async function analyzeChangeImpact(repositoryPath:string,
     baseCommit: string,
     targetCommit: string
 ): Promise<ImpactAnalysisResult> {
-    const diff = await analyzeGitDiff(repositoryPath,baseCommit,targetCommit);
-    const graph = await buildDependencyGraph(repositoryPath);
+    const diff = await analyzeGitDiff(
+        repositoryPath,
+        baseCommit,
+        targetCommit
+    );
+    const baseGraph = await buildGraphAtCommit(repositoryPath, baseCommit);
+    const targetGraph = await buildGraphAtCommit(repositoryPath, targetCommit);
     const affected = new Set<string>();
+
     for(const file of diff.files){
-        const changedPaths = [file.path];
-        if(file.previousPath){
-            changedPaths.push(file.previousPath);
-        }
+        const changedPaths = file.previousPath ? [file.previousPath, file.path]:[file.path];
         for(const changePath of changedPaths){
-            for(const affectedFile of findAffectedFiles(graph,changePath)){
-                affected.add(affectedFile);
+            for(const graph of [baseGraph, targetGraph]){
+                for(const affectedFile of findAffectedFiles(graph,changePath)){
+                    affected.add(affectedFile);
+                }
             }
         }
     }
@@ -33,7 +81,11 @@ export async function analyzeChangeImpact(repositoryPath:string,
             .filter(file => !changedPaths.has(file))
             .sort();
     
-    const affectedTests = affectedFiles.filter(file => /(^|\/)(__tests__\/|tests?\/)|\.(test|spec)\.[jt]sx?$/.test(file));
+    const directlyChangeTests = diff.files.flatMap(file => [file.path, ...(file.previousPath ? [file.previousPath] : [])]).filter(isTestPath);
+    const affectedTests = [...new Set([
+        ...directlyChangeTests,
+        ...affectedFiles.filter(isTestPath)
+    ])].sort();
 
     return {
         diff,
