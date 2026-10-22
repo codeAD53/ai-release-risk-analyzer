@@ -44,6 +44,66 @@ test("builds dependencies and reverse dependents", async() => {
     }
 });
 
+test("finds dynamic import and require dependencies in JavaScript", async () => {
+    const repo = await mkdtemp(join(tmpdir(), "dependency-dynamic-test-"));
+
+    try {
+        await mkdir(join(repo, "src"), { recursive: true });
+        await writeFile(
+            join(repo, "src", "PaymentService.ts"),
+            "export class PaymentService {}"
+        );
+        await writeFile(
+            join(repo, "src", "loader.js"),
+            'import("./PaymentService");\nrequire("./PaymentService");'
+        );
+
+        const graph = await buildDependencyGraph(repo);
+
+        assert.deepEqual(
+            graph.dependencies["src/loader.js"],
+            ["src/PaymentService.ts"]
+        );
+        assert.deepEqual(
+            graph.dependents["src/PaymentService.ts"],
+            ["src/loader.js"]
+        );
+    } finally {
+        await rm(repo, { recursive: true, force: true });
+    }
+});
+
+test("ignores dependency-like text in JavaScript comments and strings", async () => {
+    const repo = await mkdtemp(join(tmpdir(), "dependency-literal-test-"));
+
+    try {
+        await mkdir(join(repo, "src"), { recursive: true });
+        await writeFile(
+            join(repo, "src", "PaymentService.ts"),
+            "export class PaymentService {}"
+        );
+        await writeFile(
+            join(repo, "src", "loader.js"),
+            'require("./PaymentService");\n' +
+                '// require("./FakeComment");\n' +
+                'const example = \'import("./FakeString")\';'
+        );
+
+        const graph = await buildDependencyGraph(repo);
+        const graphFiles = Object.values(graph.dependencies).flat();
+
+        assert.deepEqual(
+            graph.dependencies["src/loader.js"],
+            ["src/PaymentService.ts"]
+        );
+        assert.ok(!graphFiles.some(file =>
+            file.includes("FakeComment") || file.includes("FakeString")
+        ));
+    } finally {
+        await rm(repo, { recursive: true, force: true });
+    }
+});
+
 test("ignore files inside node_modules", async () => {
     const repo = await mkdtemp(join(tmpdir(), "dependency-ignore-test-"));
 

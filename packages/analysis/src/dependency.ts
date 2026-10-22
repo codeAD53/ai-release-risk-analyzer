@@ -1,6 +1,14 @@
-import { readdir, readFile } from "node:fs/promises";
+import { readdir } from "node:fs/promises";
 import { extname, join, relative, resolve } from "node:path";
-
+import { API } from "typescript/unstable/sync";
+import {
+    isCallExpression,
+    isExportDeclaration,
+    isIdentifier,
+    isImportDeclaration,
+    isStringLiteral
+} from "typescript/unstable/ast/is";
+import { SyntaxKind, type Node, type SourceFile } from "typescript/unstable/ast";
 export interface DependencyGraph{
     dependencies: Record<string, string[]>;
     dependents: Record<string,string[]>;
@@ -34,17 +42,39 @@ async function collectSourceFiles(directory:string): Promise<string[]> {
     return files;
 }
 
-function extractRelativeImports(source: string): string[] {
-    const imports: string[] = [];
-    const pattern =
-  /\b(?:import|export)\s+(?:type\s+)?(?:[^;]*?\s+from\s*)?["']([^"']+)["']/g;
-    for(const match of source.matchAll(pattern)){
-        const specifier = match[1];
-        if(specifier.startsWith("./") || specifier.startsWith("../")){
-            imports.push(specifier);
+function extractRelativeImports(sourceFile: SourceFile): string[] {
+    const imports = new Set<string>();
+
+    function visit(node: Node): void {
+        if(
+            (isImportDeclaration(node) ||
+                isExportDeclaration(node)) &&
+                node.moduleSpecifier &&
+                isStringLiteral(node.moduleSpecifier)
+        ){
+            const specifier = node.moduleSpecifier.text;
+
+            if(specifier.startsWith("./") || specifier.startsWith("../")){
+                imports.add(specifier);
+            }
         }
+
+        if(isCallExpression(node) &&
+            node.arguments.length > 0 &&
+            isStringLiteral(node.arguments[0]) &&
+            (node.expression.kind === SyntaxKind.ImportKeyword ||
+                (isIdentifier(node.expression) &&
+            node.expression.text === "require"))
+        ){
+            const specifier = node.arguments[0].text;
+            if(specifier.startsWith("./") || specifier.startsWith("../")){
+                imports.add(specifier);
+            }
+        }
+        node.forEachChild(visit);
     }
-    return imports;
+    sourceFile.forEachChild(visit);
+    return [...imports];
 }
 
 async function resolveImport(
@@ -81,27 +111,42 @@ export async function buildDependencyGraph(repositoryPath:string):Promise<Depend
         dependencies[relativeFile] = [];
         dependents[relativeFile] = [];
     }
-    for(const file of sourceFiles){
-        const relativeFile = relative(root,file).replace(/\\/g, "/");
-        const source = await readFile(file, "utf8");
-        const specifiers = extractRelativeImports(source);
+    const api = new API({ cwd: root });
+    try {
+        const snapshot = api.updateSnapshot({ openFiles: sourceFiles });
+        try {
+            for(const file of sourceFiles){
+                const relativeFile = relative(root,file).replace(/\\/g, "/");
+                const sourceFile = snapshot
+                    .getDefaultProjectForFile(file)
+                    ?.program.getSourceFile(file);
+                if(!sourceFile){
+                    throw new Error(`TypeScript could not parse source file: ${file}`);
+                }
+                const specifiers = extractRelativeImports(sourceFile);
 
-        for(const specifier of specifiers){
-            const resolvePath = await resolveImport(file, specifier, knownFiles);
+                for(const specifier of specifiers){
+                    const resolvePath = await resolveImport(file, specifier, knownFiles);
 
-            if(!resolvePath){
-                continue;
+                    if(!resolvePath){
+                        continue;
+                    }
+                    const dependency = relative(root, resolvePath).replace(/\\/g, "/");
+
+                    if(!dependencies[relativeFile].includes(dependency)){
+                        dependencies[relativeFile].push(dependency);
+                    }
+
+                    if(!dependents[dependency].includes(relativeFile)){
+                        dependents[dependency].push(relativeFile);
+                    }
+                }
             }
-            const dependency = relative(root, resolvePath).replace(/\\/g, "/");
-
-            if(!dependencies[relativeFile].includes(dependency)){
-                dependencies[relativeFile].push(dependency);
-            }
-
-            if(!dependents[dependency].includes(relativeFile)){
-                dependents[dependency].push(relativeFile);
-            }
+        } finally {
+            snapshot.dispose();
         }
+    } finally {
+        api.close();
     }
     return { dependencies, dependents };
 }
