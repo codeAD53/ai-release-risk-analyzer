@@ -1,17 +1,6 @@
-import { readdir } from "node:fs/promises";
+import { readdir, readFile } from "node:fs/promises";
 import { extname, join, relative, resolve } from "node:path";
-import { API } from "typescript/unstable/sync";
-import {
-    isCallExpression,
-    isExternalModuleReference,
-    isExportDeclaration,
-    isIdentifier,
-    isImportEqualsDeclaration,
-    isImportDeclaration,
-    isNoSubstitutionTemplateLiteral,
-    isStringLiteral
-} from "typescript/unstable/ast/is";
-import { SyntaxKind, type Node, type SourceFile } from "typescript/unstable/ast";
+import ts from "typescript";
 export interface DependencyGraph{
     dependencies: Record<string, string[]>;
     dependents: Record<string,string[]>;
@@ -45,11 +34,18 @@ async function collectSourceFiles(directory:string): Promise<string[]> {
     return files;
 }
 
-function extractRelativeImports(sourceFile: SourceFile): string[] {
+function extractRelativeImports(source: string): string[] {
+    const sourceFile = ts.createSourceFile(
+        "source.ts",
+        source,
+        ts.ScriptTarget.Latest,
+        true,
+        ts.ScriptKind.TSX
+    );
     const imports = new Set<string>();
 
-    function addRelativeSpecifier(node: Node | undefined): void {
-        if(!node || (!isStringLiteral(node) && !isNoSubstitutionTemplateLiteral(node))){
+    function addRelativeSpecifier(node: ts.Node | undefined): void {
+        if(!node || !ts.isStringLiteralLike(node)){
             return;
         }
 
@@ -59,34 +55,34 @@ function extractRelativeImports(sourceFile: SourceFile): string[] {
         }
     }
 
-    function visit(node: Node): void {
+    function visit(node: ts.Node): void {
         if(
-            (isImportDeclaration(node) ||
-                isExportDeclaration(node)) &&
+            (ts.isImportDeclaration(node) ||
+                ts.isExportDeclaration(node)) &&
                 node.moduleSpecifier &&
-                isStringLiteral(node.moduleSpecifier)
+                ts.isStringLiteralLike(node.moduleSpecifier)
         ){
             addRelativeSpecifier(node.moduleSpecifier);
         }
 
         if(
-            isImportEqualsDeclaration(node) &&
-            isExternalModuleReference(node.moduleReference)
+            ts.isImportEqualsDeclaration(node) &&
+            ts.isExternalModuleReference(node.moduleReference)
         ){
             addRelativeSpecifier(node.moduleReference.expression);
         }
 
-        if(isCallExpression(node) &&
+        if(ts.isCallExpression(node) &&
             node.arguments.length > 0 &&
-            (node.expression.kind === SyntaxKind.ImportKeyword ||
-                (isIdentifier(node.expression) &&
+            (node.expression.kind === ts.SyntaxKind.ImportKeyword ||
+                (ts.isIdentifier(node.expression) &&
             node.expression.text === "require"))
         ){
             addRelativeSpecifier(node.arguments[0]);
         }
-        node.forEachChild(visit);
+        ts.forEachChild(node, visit);
     }
-    sourceFile.forEachChild(visit);
+    visit(sourceFile);
     return [...imports];
 }
 
@@ -124,42 +120,27 @@ export async function buildDependencyGraph(repositoryPath:string):Promise<Depend
         dependencies[relativeFile] = [];
         dependents[relativeFile] = [];
     }
-    const api = new API({ cwd: root });
-    try {
-        const snapshot = api.updateSnapshot({ openFiles: sourceFiles });
-        try {
-            for(const file of sourceFiles){
-                const relativeFile = relative(root,file).replace(/\\/g, "/");
-                const sourceFile = snapshot
-                    .getDefaultProjectForFile(file)
-                    ?.program.getSourceFile(file);
-                if(!sourceFile){
-                    throw new Error(`TypeScript could not parse source file: ${file}`);
-                }
-                const specifiers = extractRelativeImports(sourceFile);
+    for(const file of sourceFiles){
+        const relativeFile = relative(root,file).replace(/\\/g, "/");
+        const source = await readFile(file, "utf8");
+        const specifiers = extractRelativeImports(source);
 
-                for(const specifier of specifiers){
-                    const resolvePath = await resolveImport(file, specifier, knownFiles);
+        for(const specifier of specifiers){
+            const resolvePath = await resolveImport(file, specifier, knownFiles);
 
-                    if(!resolvePath){
-                        continue;
-                    }
-                    const dependency = relative(root, resolvePath).replace(/\\/g, "/");
-
-                    if(!dependencies[relativeFile].includes(dependency)){
-                        dependencies[relativeFile].push(dependency);
-                    }
-
-                    if(!dependents[dependency].includes(relativeFile)){
-                        dependents[dependency].push(relativeFile);
-                    }
-                }
+            if(!resolvePath){
+                continue;
             }
-        } finally {
-            snapshot.dispose();
+            const dependency = relative(root, resolvePath).replace(/\\/g, "/");
+
+            if(!dependencies[relativeFile].includes(dependency)){
+                dependencies[relativeFile].push(dependency);
+            }
+
+            if(!dependents[dependency].includes(relativeFile)){
+                dependents[dependency].push(relativeFile);
+            }
         }
-    } finally {
-        api.close();
     }
     return { dependencies, dependents };
 }
