@@ -1,6 +1,6 @@
 import { readdir, readFile } from "node:fs/promises";
 import { extname, join, relative, resolve } from "node:path";
-
+import ts from "typescript";
 export interface DependencyGraph{
     dependencies: Record<string, string[]>;
     dependents: Record<string,string[]>;
@@ -35,16 +35,55 @@ async function collectSourceFiles(directory:string): Promise<string[]> {
 }
 
 function extractRelativeImports(source: string): string[] {
-    const imports: string[] = [];
-    const pattern =
-  /\b(?:import|export)\s+(?:type\s+)?(?:[^;]*?\s+from\s*)?["']([^"']+)["']/g;
-    for(const match of source.matchAll(pattern)){
-        const specifier = match[1];
+    const sourceFile = ts.createSourceFile(
+        "source.ts",
+        source,
+        ts.ScriptTarget.Latest,
+        true,
+        ts.ScriptKind.TSX
+    );
+    const imports = new Set<string>();
+
+    function addRelativeSpecifier(node: ts.Node | undefined): void {
+        if(!node || !ts.isStringLiteralLike(node)){
+            return;
+        }
+
+        const specifier = node.text;
         if(specifier.startsWith("./") || specifier.startsWith("../")){
-            imports.push(specifier);
+            imports.add(specifier);
         }
     }
-    return imports;
+
+    function visit(node: ts.Node): void {
+        if(
+            (ts.isImportDeclaration(node) ||
+                ts.isExportDeclaration(node)) &&
+                node.moduleSpecifier &&
+                ts.isStringLiteralLike(node.moduleSpecifier)
+        ){
+            addRelativeSpecifier(node.moduleSpecifier);
+        }
+
+        if(
+            ts.isImportEqualsDeclaration(node) &&
+            ts.isExternalModuleReference(node.moduleReference)
+        ){
+            addRelativeSpecifier(node.moduleReference.expression);
+        }
+
+        if(ts.isCallExpression(node) &&
+            node.arguments.length > 0 &&
+            (node.expression.kind === ts.SyntaxKind.ImportKeyword ||
+                (ts.isIdentifier(node.expression) &&
+            node.expression.text === "require"))
+        ){
+            addRelativeSpecifier(node.arguments[0]);
+        }
+        ts.forEachChild(node, visit);
+    }
+    visit(sourceFile);
+    return [...imports];
 }
 
 async function resolveImport(
