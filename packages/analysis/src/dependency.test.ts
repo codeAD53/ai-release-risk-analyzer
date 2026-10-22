@@ -4,12 +4,10 @@ import { mkdtemp, mkdir, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 
-import { buildDependencyGraph } from "./dependency.js";
-import { write } from "node:fs";
-
+import { buildDependencyGraph, findAffectedFiles } from "./dependency.js";
 test("builds dependencies and reverse dependents", async() => {
-    const repo = await mkdtemp(join(tmpdir(), "dependency-test-"));
-    try{
+  const repo = await mkdtemp(join(tmpdir(), "dependency-test-"));
+  try{
         await mkdir(join(repo,"src"), {recursive: true});
         await mkdir(join(repo, "tests"), {recursive: true});
 
@@ -46,7 +44,7 @@ test("builds dependencies and reverse dependents", async() => {
     }
 });
 
-test("igonre files inside node_modules", async () => {
+test("ignore files inside node_modules", async () => {
     const repo = await mkdtemp(join(tmpdir(), "dependency-ignore-test-"));
 
     try{
@@ -69,4 +67,43 @@ test("igonre files inside node_modules", async () => {
     }finally{
         await rm(repo, {recursive: true, force: true});
     }
+});
+
+test("finds all transitively affected files", async () => {
+    const repo = await mkdtemp(join(tmpdir(), "affected-test-"));
+  try {
+    await mkdir(join(repo, "src", "services"), { recursive: true });
+    await mkdir(join(repo, "tests"), { recursive: true });
+
+    await writeFile(
+      join(repo, "src", "services", "PaymentService.ts"),
+      "export class PaymentService {}"
+    );
+
+    await writeFile(
+      join(repo, "src", "services", "OrderService.ts"),
+      'import { PaymentService } from "./PaymentService";\n' +
+      "export class OrderService extends PaymentService {}"
+    );
+
+    await writeFile(
+      join(repo, "tests", "order.test.ts"),
+      'import { OrderService } from "../src/services/OrderService";\n' +
+      "void OrderService;"
+    );
+
+    const graph = await buildDependencyGraph(repo);
+
+    const affected = findAffectedFiles(
+      graph,
+      "src/services/PaymentService.ts"
+    );
+
+    assert.deepEqual(affected, [
+      "src/services/OrderService.ts",
+      "tests/order.test.ts"
+    ]);
+  } finally {
+    await rm(repo, { recursive: true, force: true });
+  }
 });
