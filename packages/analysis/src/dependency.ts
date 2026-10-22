@@ -14,7 +14,17 @@ async function collectSourceFiles(directory:string): Promise<string[]> {
     for(const entry of entries){
         const fullPath = join(directory, entry.name);
         if(entry.isDirectory()){
+
+            const ignoredDirectories = new Set([
+                "node_modules",
+                ".git",
+                "dist",
+                "coverage",
+                "build"
+            ]);
+            if(!ignoredDirectories.has(entry.name)){
             files.push(...await collectSourceFiles(fullPath));
+        }
         }else if(
             entry.isFile() && SOURCE_EXTENSIONS.has(extname(entry.name)) && !entry.name.endsWith(".d.ts")
         ){
@@ -26,7 +36,8 @@ async function collectSourceFiles(directory:string): Promise<string[]> {
 
 function extractRelativeImports(source: string): string[] {
     const imports: string[] = [];
-    const pattern = /\b(?:import|export)\s+(?:type\s+)?(?:[^;]*?\s+from\s*)?["']([^"']+)["']/g;
+    const pattern =
+  /\b(?:import|export)\s+(?:type\s+)?(?:[^;]*?\s+from\s*)?["']([^"']+)["']/g;
     for(const match of source.matchAll(pattern)){
         const specifier = match[1];
         if(specifier.startsWith("./") || specifier.startsWith("../")){
@@ -46,7 +57,7 @@ async function resolveImport(
     const candidates = [basePath, ...[".ts", ".tsx", ".js",".jsx"].map(
         extension => basePath + extension
     ),
-    ...["index.ts","index.tsx","index.js","indec.jsx"].map(filename => join(basePath,filename))
+    ...["index.ts","index.tsx","index.js","index.jsx"].map(filename => join(basePath,filename))
 ];
 
 for(const candidate of candidates){
@@ -93,4 +104,33 @@ export async function buildDependencyGraph(repositoryPath:string):Promise<Depend
         }
     }
     return { dependencies, dependents };
+}
+
+
+export function findAffectedFiles(
+  graph: DependencyGraph,
+  changedFile: string
+): string[] {
+  const affected = new Set<string>();
+  const visited = new Set<string>([changedFile]);
+  const queue = [...(graph.dependents[changedFile] ?? [])];
+
+  while (queue.length > 0) {
+    const currentFile = queue.shift()!;
+
+    if (visited.has(currentFile)) {
+      continue;
+    }
+
+    visited.add(currentFile);
+    affected.add(currentFile);
+
+    for (const dependent of graph.dependents[currentFile] ?? []) {
+      if (!visited.has(dependent)) {
+        queue.push(dependent);
+      }
+    }
+  }
+
+  return [...affected].sort();
 }

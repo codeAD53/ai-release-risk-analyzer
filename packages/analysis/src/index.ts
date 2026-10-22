@@ -20,7 +20,7 @@ export interface GitDiffResult{
 }
 
 function isValidCommitReference(value: string): boolean {
-    return /^[a-fA-F0-9]{7,40}/.test(value);
+    return /^[a-fA-F0-9]{7,40}$/.test(value);
 }
 
 export async function analyzeGitDiff(
