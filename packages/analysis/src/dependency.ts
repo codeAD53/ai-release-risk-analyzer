@@ -3,9 +3,12 @@ import { extname, join, relative, resolve } from "node:path";
 import { API } from "typescript/unstable/sync";
 import {
     isCallExpression,
+    isExternalModuleReference,
     isExportDeclaration,
     isIdentifier,
+    isImportEqualsDeclaration,
     isImportDeclaration,
+    isNoSubstitutionTemplateLiteral,
     isStringLiteral
 } from "typescript/unstable/ast/is";
 import { SyntaxKind, type Node, type SourceFile } from "typescript/unstable/ast";
@@ -45,6 +48,17 @@ async function collectSourceFiles(directory:string): Promise<string[]> {
 function extractRelativeImports(sourceFile: SourceFile): string[] {
     const imports = new Set<string>();
 
+    function addRelativeSpecifier(node: Node | undefined): void {
+        if(!node || (!isStringLiteral(node) && !isNoSubstitutionTemplateLiteral(node))){
+            return;
+        }
+
+        const specifier = node.text;
+        if(specifier.startsWith("./") || specifier.startsWith("../")){
+            imports.add(specifier);
+        }
+    }
+
     function visit(node: Node): void {
         if(
             (isImportDeclaration(node) ||
@@ -52,24 +66,23 @@ function extractRelativeImports(sourceFile: SourceFile): string[] {
                 node.moduleSpecifier &&
                 isStringLiteral(node.moduleSpecifier)
         ){
-            const specifier = node.moduleSpecifier.text;
+            addRelativeSpecifier(node.moduleSpecifier);
+        }
 
-            if(specifier.startsWith("./") || specifier.startsWith("../")){
-                imports.add(specifier);
-            }
+        if(
+            isImportEqualsDeclaration(node) &&
+            isExternalModuleReference(node.moduleReference)
+        ){
+            addRelativeSpecifier(node.moduleReference.expression);
         }
 
         if(isCallExpression(node) &&
             node.arguments.length > 0 &&
-            isStringLiteral(node.arguments[0]) &&
             (node.expression.kind === SyntaxKind.ImportKeyword ||
                 (isIdentifier(node.expression) &&
             node.expression.text === "require"))
         ){
-            const specifier = node.arguments[0].text;
-            if(specifier.startsWith("./") || specifier.startsWith("../")){
-                imports.add(specifier);
-            }
+            addRelativeSpecifier(node.arguments[0]);
         }
         node.forEachChild(visit);
     }
