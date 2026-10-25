@@ -1,9 +1,15 @@
 import { readdir, readFile } from "node:fs/promises";
 import { extname, join, relative, resolve } from "node:path";
 import ts from "typescript";
+
+export interface UnresolvedImport{
+    importer: string;
+    specifier: string;
+}
 export interface DependencyGraph{
     dependencies: Record<string, string[]>;
     dependents: Record<string,string[]>;
+    unresolvedImports: UnresolvedImport[];
 }
 
 const SOURCE_EXTENSIONS = new Set([".ts",".tsx",".js",".jsx"]);
@@ -114,6 +120,7 @@ export async function buildDependencyGraph(repositoryPath:string):Promise<Depend
     const knownFiles = new Set(sourceFiles.map(file => resolve(file)));
     const dependencies: Record<string, string[]> = {};
     const dependents: Record<string, string[]> = {};
+    const unresolvedImports: UnresolvedImport[] = [];
 
     for(const file of sourceFiles){
         const relativeFile = relative(root,file).replace(/\\/g, "/");
@@ -129,6 +136,10 @@ export async function buildDependencyGraph(repositoryPath:string):Promise<Depend
             const resolvePath = await resolveImport(file, specifier, knownFiles);
 
             if(!resolvePath){
+                unresolvedImports.push({
+                    importer: relative(root,file).replace(/\\/g, "/"),
+                    specifier,
+                });
                 continue;
             }
             const dependency = relative(root, resolvePath).replace(/\\/g, "/");
@@ -142,7 +153,7 @@ export async function buildDependencyGraph(repositoryPath:string):Promise<Depend
             }
         }
     }
-    return { dependencies, dependents };
+    return { dependencies, dependents, unresolvedImports };
 }
 
 
