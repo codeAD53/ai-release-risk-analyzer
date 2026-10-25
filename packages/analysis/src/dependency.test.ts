@@ -204,3 +204,35 @@ test("finds all transitively affected files", async () => {
     await rm(repo, { recursive: true, force: true });
   }
 });
+
+test("tracks resolved and unresolved local imports", async () => {
+    const repo = await mkdtemp(
+        join(tmpdir(), "dependency-resolution-test-")
+    );
+    try{
+        await mkdir(join(repo,"src"), {recursive: true});
+        await writeFile(join(repo,"src","PaymentService.ts"),
+    "export class PaymentService {}");
+
+    await writeFile(join(repo,"src","OrderService.ts"),
+'import {PaymentService} from "./PaymentService";\n'+
+    'import {calculateTax} from "./missingTax";\n'+
+    "void PaymentService;\n"+
+    "void calculateTax;");
+    const graph = await buildDependencyGraph(repo);
+    assert.deepEqual(graph.dependencies["src/OrderService.ts"],["src/PaymentService.ts"]);
+
+    assert.deepEqual(graph.dependents["src/PaymentService.ts"],["src/OrderService.ts"]);
+
+    assert.deepEqual(graph.unresolvedImports, [
+        {
+            importer: "src/OrderService.ts",
+            specifier: "./missingTax",
+        },
+    ]);
+    }
+
+    finally{
+        await rm(repo, {recursive: true, force: true});
+    }
+});
