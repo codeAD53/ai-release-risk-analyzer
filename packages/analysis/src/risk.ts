@@ -1,6 +1,6 @@
 export type RiskCategory = "Low" | "Moderate" | "High" | "Critical";
 
-export interface RiskFactor{
+export interface RiskFactor {
     name: string;
     points: number;
     explanation: string;
@@ -12,37 +12,37 @@ export interface ReleaseRiskResult {
     factors: RiskFactor[];
 }
 
-function scoreChangedFiles(count: number): RiskFactor{
+function scoreChangedFiles(count: number): RiskFactor {
     let points: number;
-    if(count === 0){
+    if (count === 0) {
         points = 0;
-    }else if(count === 1){
+    } else if (count === 1) {
         points = 5;
-    }else if(count <= 3){
+    } else if (count <= 3) {
         points = 10;
-    }else if(count <=6){
+    } else if (count <= 6) {
         points = 20;
-    }else{
+    } else {
         points = 30;
     }
-    return{
+    return {
         name: "Changes files",
         points,
         explanation: `${count} file(s) changed in this release`,
     };
 }
 
-function scoreAffectedFiles(count: number):RiskFactor{
+function scoreAffectedFiles(count: number): RiskFactor {
     let points: number;
-    if(count === 0){
+    if (count === 0) {
         points = 0;
-    }else if(count <= 2){
+    } else if (count <= 2) {
         points = 10;
-    }else if(count <=5){
+    } else if (count <= 5) {
         points = 20;
-    }else if(count <= 10){
+    } else if (count <= 10) {
         points = 30;
-    }else{
+    } else {
         points = 40;
     }
     return {
@@ -52,36 +52,36 @@ function scoreAffectedFiles(count: number):RiskFactor{
     };
 }
 
-function scoreAffectedTests(count: number): RiskFactor{
+function scoreAffectedTests(count: number): RiskFactor {
     let points: number;
-    if(count === 0){
+    if (count === 0) {
         points = 30;
-    }else if(count === 1){
+    } else if (count === 1) {
         points = 20;
-    }else if(count === 2){
+    } else if (count === 2) {
         points = 10;
-    }else{
+    } else {
         points = 0;
     }
     return {
         name: "Affected tests",
         points,
-        explanation: 
+        explanation:
             count === 0
                 ? "No affected tests were identified, increasing testing uncertainty."
                 : `${count} potentially affected test(s) were identified.`,
     }
 }
 
-function scoreUnresolvedImports(count: number):RiskFactor{
+function scoreUnresolvedImports(count: number): RiskFactor {
     let points: number;
-    if(count === 0){
+    if (count === 0) {
         points = 0;
-    }else if(count === 1){
+    } else if (count === 1) {
         points = 15;
-    }else if(count <= 3){
+    } else if (count <= 3) {
         points = 25;
-    }else{
+    } else {
         points = 35;
     }
     return {
@@ -91,15 +91,15 @@ function scoreUnresolvedImports(count: number):RiskFactor{
     };
 }
 
-export function getRiskCategory(score: number): RiskCategory{
-    if(score < 25){
+export function getRiskCategory(score: number): RiskCategory {
+    if (score < 25) {
         return "Low";
     }
-    if(score < 50){
+    if (score < 50) {
         return "Moderate";
     }
 
-    if(score < 75){
+    if (score < 75) {
         return "High";
     }
 
@@ -112,6 +112,20 @@ export function calculateReleaseRisk(input: {
     affectedTests: number;
     newUnresolvedImports: number;
 }): ReleaseRiskResult {
+
+    if (
+        input.changedFiles === 0 &&
+        input.affectedFiles === 0 &&
+        input.affectedTests === 0 &&
+        input.newUnresolvedImports === 0
+    ) {
+        return {
+            score: 0,
+            category: "Low",
+            factors: [],
+        };
+    }
+
     const factors: RiskFactor[] = [
         scoreChangedFiles(input.changedFiles),
         scoreAffectedFiles(input.affectedFiles),

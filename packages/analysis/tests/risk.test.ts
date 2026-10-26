@@ -90,3 +90,17 @@ test("increases risk for newly unresolved imports", () => {
 
     assert.ok(withResolvedImports.score > withoutResolvedImports.score);
 });
+
+test("returns zero risk when there are no changes", () => {
+    const result = calculateReleaseRisk({
+        changedFiles: 0,
+        affectedFiles: 0,
+        affectedTests: 0,
+        newUnresolvedImports: 0,
+    });
+
+    assert.equal(result.score, 0);
+    assert.equal(result.category, "Low");
+    assert.deepEqual(result.factors, []);
+});
+

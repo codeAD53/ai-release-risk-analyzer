@@ -85,7 +85,7 @@ export async function analyzeChangeImpact(repositoryPath:string,
         }));
     const newlyUnresolvedImports = targetGraph.unresolvedImports.filter((unresolvedImport)=>
         !baseUnresolvedImport.has(getUnresolvedImportKey(unresolvedImport)));
-    
+
     const affected = new Set<string>();
 
     for(const file of diff.files){
@@ -114,6 +114,12 @@ export async function analyzeChangeImpact(repositoryPath:string,
         ...affectedFiles.filter(isTestPath)
     ])].sort();
 
+    const targetTestPaths = new Set(
+        Object.keys(targetGraph.dependencies).filter(isTestPath),
+    );
+
+    const existingAffectedTests = affectedTests.filter((file) => targetTestPaths.has(file));
+    
     const risk = calculateReleaseRisk({
         changedFiles: diff.totalChangedFiles,
         affectedFiles: affectedFiles.length,
