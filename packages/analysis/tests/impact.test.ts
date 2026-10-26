@@ -12,7 +12,7 @@ import { tmpdir } from "node:os";
 import { dirname, join } from "node:path";
 import { execFile } from "node:child_process";
 import { promisify } from "node:util";
-import { analyzeChangeImpact } from "./impact.js";
+import { analyzeChangeImpact } from "../src/impact.js";
 
 const execFileAsync = promisify(execFile);
 
@@ -257,3 +257,177 @@ test("includes a directly changed test in affectedTests", async () => {
     await rm(repo, { recursive: true, force: true });
   }
 });
+
+test("detects a newly unresolved import", async () => {
+  const repo = await createRepository();
+
+  try {
+    await writeRepositoryFile(
+      repo,
+      "src/PaymentService.ts",
+      "export class PaymentService {}\n"
+    );
+
+    await writeRepositoryFile(
+      repo,
+      "src/OrderService.ts",
+      'import { PaymentService } from "./PaymentService";\n' +
+      "export class OrderService extends PaymentService {}\n"
+    );
+
+    const baseCommit = await commitAll(repo, "Initial commit");
+
+    await rm(join(repo, "src", "PaymentService.ts"));
+
+    const targetCommit = await commitAll(
+      repo,
+      "Delete payment service"
+    );
+
+    const result = await analyzeChangeImpact(
+      repo,
+      baseCommit,
+      targetCommit
+    );
+
+    assert.deepEqual(result.newlyUnresolvedImports, [
+      {
+        importer: "src/OrderService.ts",
+        specifier: "./PaymentService",
+      },
+    ]);
+
+    assert.ok(result.risk.score > 0);
+  } finally {
+    await rm(repo, { recursive: true, force: true });
+  }
+});
+
+
+test("does not report pre-existing unresolved imports as new", async () => {
+  const repo = await createRepository();
+
+  try {
+    await writeRepositoryFile(
+      repo,
+      "src/OrderService.ts",
+      'import { MissingService } from "./MissingService";\n' +
+      "export class OrderService extends MissingService {}\n"
+    );
+
+    const baseCommit = await commitAll(repo, "Initial commit");
+
+    // Change unrelated code without fixing the existing unresolved import.
+    await writeRepositoryFile(
+      repo,
+      "src/CheckoutService.ts",
+      "export class CheckoutService {}\n"
+    );
+
+    const targetCommit = await commitAll(
+      repo,
+      "Add checkout service"
+    );
+
+    const result = await analyzeChangeImpact(
+      repo,
+      baseCommit,
+      targetCommit
+    );
+
+    assert.deepEqual(result.newlyUnresolvedImports, []);
+
+  } finally {
+    await rm(repo, { recursive: true, force: true });
+  }
+});
+
+
+test("does not report an existing unresolved import as new when its importer is renamed", async () => {
+  const repo = await createRepository();
+
+  try {
+    await writeRepositoryFile(
+      repo,
+      "src/OrderService.ts",
+      'import { MissingService } from "./MissingService";\n' +
+      "export class OrderService extends MissingService {}\n"
+    );
+
+    const baseCommit = await commitAll(repo, "Initial commit");
+
+    // Rename the importer without changing its unresolved import.
+    await rename(
+      join(repo, "src", "OrderService.ts"),
+      join(repo, "src", "PurchaseService.ts")
+    );
+
+    const targetCommit = await commitAll(
+      repo,
+      "Rename order service"
+    );
+
+    const result = await analyzeChangeImpact(
+      repo,
+      baseCommit,
+      targetCommit
+    );
+
+    assert.deepEqual(result.newlyUnresolvedImports, []);
+  } finally {
+    await rm(repo, { recursive: true, force: true });
+  }
+});
+
+
+test("detects a newly unresolved import introduced by a changed file", async () => {
+    const repo = await createRepository();
+
+    try {
+        await writeRepositoryFile(
+            repo,
+            "src/PaymentService.ts",
+            "export class PaymentService {}\n"
+        );
+
+        await writeRepositoryFile(
+            repo,
+            "src/OrderService.ts",
+            'import { PaymentService } from "./PaymentService";\n' +
+            "export class OrderService extends PaymentService {}\n"
+        );
+
+        const baseCommit = await commitAll(repo, "Initial commit");
+
+        await writeRepositoryFile(
+            repo,
+            "src/OrderService.ts",
+            'import { MissingService } from "./MissingService";\n' +
+            "export class OrderService extends MissingService {}\n"
+        );
+
+        const targetCommit = await commitAll(
+            repo,
+            "Introduce unresolved import"
+        );
+
+        const result = await analyzeChangeImpact(
+            repo,
+            baseCommit,
+            targetCommit
+        );
+
+        assert.deepEqual(result.newlyUnresolvedImports, [
+            {
+                importer: "src/OrderService.ts",
+                specifier: "./MissingService",
+            },
+        ]);
+
+        assert.ok(result.risk.score > 0);
+    } finally {
+        await rm(repo, { recursive: true, force: true });
+    }
+});
+
+

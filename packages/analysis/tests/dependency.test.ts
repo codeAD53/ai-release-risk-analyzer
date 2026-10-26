@@ -4,7 +4,7 @@ import { mkdtemp, mkdir, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 
-import { buildDependencyGraph, findAffectedFiles } from "./dependency.js";
+import { buildDependencyGraph, findAffectedFiles } from "../src/dependency.js";
 test("builds dependencies and reverse dependents", async() => {
   const repo = await mkdtemp(join(tmpdir(), "dependency-test-"));
   try{
