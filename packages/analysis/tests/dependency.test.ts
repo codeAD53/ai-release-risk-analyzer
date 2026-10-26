@@ -236,3 +236,68 @@ test("tracks resolved and unresolved local imports", async () => {
         await rm(repo, {recursive: true, force: true});
     }
 });
+
+
+test("resolves .js imports to TypeScript source files", async () => {
+    const repo = await mkdtemp(
+        join(tmpdir(), "dependency-js-to-ts-test-"),
+    );
+
+    try {
+        await mkdir(join(repo, "src"), { recursive: true });
+
+        await writeFile(
+            join(repo, "src", "PaymentService.ts"),
+            "export class PaymentService {}",
+        );
+
+        await writeFile(
+            join(repo, "src", "OrderService.ts"),
+            'import { PaymentService } from "./PaymentService.js";\n' +
+                "void PaymentService;",
+        );
+
+        const graph = await buildDependencyGraph(repo);
+
+        assert.deepEqual(
+            graph.dependencies["src/OrderService.ts"],
+            ["src/PaymentService.ts"],
+        );
+
+        assert.deepEqual(graph.unresolvedImports, []);
+    } finally {
+        await rm(repo, { recursive: true, force: true });
+    }
+});
+
+test("resolves .js imports to TSX source files", async () => {
+    const repo = await mkdtemp(
+        join(tmpdir(), "dependency-js-to-tsx-test-"),
+    );
+
+    try {
+        await mkdir(join(repo, "src"), { recursive: true });
+
+        await writeFile(
+            join(repo, "src", "Component.tsx"),
+            "export const Component = () => null;",
+        );
+
+        await writeFile(
+            join(repo, "src", "App.tsx"),
+            'import { Component } from "./Component.js";\n' +
+                "void Component;",
+        );
+
+        const graph = await buildDependencyGraph(repo);
+
+        assert.deepEqual(
+            graph.dependencies["src/App.tsx"],
+            ["src/Component.tsx"],
+        );
+
+        assert.deepEqual(graph.unresolvedImports, []);
+    } finally {
+        await rm(repo, { recursive: true, force: true });
+    }
+});

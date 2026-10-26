@@ -123,7 +123,7 @@ export async function analyzeChangeImpact(repositoryPath:string,
     const risk = calculateReleaseRisk({
         changedFiles: diff.totalChangedFiles,
         affectedFiles: affectedFiles.length,
-        affectedTests: affectedTests.length,
+        affectedTests: existingAffectedTests.length,
         newUnresolvedImports: newlyUnresolvedImports.length,
     })
     return {

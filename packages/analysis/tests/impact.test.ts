@@ -381,53 +381,106 @@ test("does not report an existing unresolved import as new when its importer is 
 
 
 test("detects a newly unresolved import introduced by a changed file", async () => {
-    const repo = await createRepository();
+  const repo = await createRepository();
 
-    try {
-        await writeRepositoryFile(
-            repo,
-            "src/PaymentService.ts",
-            "export class PaymentService {}\n"
-        );
+  try {
+    await writeRepositoryFile(
+      repo,
+      "src/PaymentService.ts",
+      "export class PaymentService {}\n"
+    );
 
-        await writeRepositoryFile(
-            repo,
-            "src/OrderService.ts",
-            'import { PaymentService } from "./PaymentService";\n' +
-            "export class OrderService extends PaymentService {}\n"
-        );
+    await writeRepositoryFile(
+      repo,
+      "src/OrderService.ts",
+      'import { PaymentService } from "./PaymentService";\n' +
+      "export class OrderService extends PaymentService {}\n"
+    );
 
-        const baseCommit = await commitAll(repo, "Initial commit");
+    const baseCommit = await commitAll(repo, "Initial commit");
 
-        await writeRepositoryFile(
-            repo,
-            "src/OrderService.ts",
-            'import { MissingService } from "./MissingService";\n' +
-            "export class OrderService extends MissingService {}\n"
-        );
+    await writeRepositoryFile(
+      repo,
+      "src/OrderService.ts",
+      'import { MissingService } from "./MissingService";\n' +
+      "export class OrderService extends MissingService {}\n"
+    );
 
-        const targetCommit = await commitAll(
-            repo,
-            "Introduce unresolved import"
-        );
+    const targetCommit = await commitAll(
+      repo,
+      "Introduce unresolved import"
+    );
 
-        const result = await analyzeChangeImpact(
-            repo,
-            baseCommit,
-            targetCommit
-        );
+    const result = await analyzeChangeImpact(
+      repo,
+      baseCommit,
+      targetCommit
+    );
 
-        assert.deepEqual(result.newlyUnresolvedImports, [
-            {
-                importer: "src/OrderService.ts",
-                specifier: "./MissingService",
-            },
-        ]);
+    assert.deepEqual(result.newlyUnresolvedImports, [
+      {
+        importer: "src/OrderService.ts",
+        specifier: "./MissingService",
+      },
+    ]);
 
-        assert.ok(result.risk.score > 0);
-    } finally {
-        await rm(repo, { recursive: true, force: true });
-    }
+    assert.ok(result.risk.score > 0);
+  } finally {
+    await rm(repo, { recursive: true, force: true });
+  }
+});
+
+test("does not count a deleted test toward release risk coverage", async () => {
+  const repo = await createRepository();
+
+  try {
+    await writeRepositoryFile(
+      repo,
+      "src/PaymentService.ts",
+      "export class PaymentService { pay() { return true; } }\n",
+    );
+
+    await writeRepositoryFile(
+      repo,
+      "tests/payment.test.ts",
+      'import { PaymentService } from "../src/PaymentService";\n' +
+      "void PaymentService;\n",
+    );
+
+    const baseCommit = await commitAll(repo, "Initial commit");
+
+    // Delete the test while changing the source file.
+    await rm(join(repo, "tests", "payment.test.ts"));
+
+    await writeRepositoryFile(
+      repo,
+      "src/PaymentService.ts",
+      "export class PaymentService { pay() { return false; } }\n",
+    );
+
+    const targetCommit = await commitAll(repo, "Delete test and change payment behavior");
+
+    const result = await analyzeChangeImpact(repo, baseCommit, targetCommit);
+
+    assert.deepEqual(result.diff.files, [
+      { status: "modified", path: "src/PaymentService.ts" },
+      { status: "deleted", path: "tests/payment.test.ts" },
+    ]);
+
+    // The deleted test must not count as an existing affected test.
+    const testCoverageFactor = result.risk.factors.find(
+      (factor) => factor.name === "Affected tests",
+    );
+
+    assert.ok(testCoverageFactor);
+    assert.equal(testCoverageFactor.points, 30);
+    assert.match(
+      testCoverageFactor.explanation,
+      /No affected tests were identified/,
+    );
+  } finally {
+    await rm(repo, { recursive: true, force: true });
+  }
 });
 
 
